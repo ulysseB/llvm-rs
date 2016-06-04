@@ -21,4 +21,4 @@ lto = true
 [dependencies]
 cbox = "0.*"
 libc = "0.*"
-llvm-sys = "0.*"
+llvm-sys = { path = "../llvm-sys.rs" }
