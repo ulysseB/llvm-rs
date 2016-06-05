@@ -6,9 +6,9 @@ use ffi::transforms::pass_manager_builder as builder;
 use ffi::bit_writer as writer;
 use ffi::bit_reader as reader;
 use cbox::{CBox, CSemiBox};
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::iter::{Iterator, IntoIterator};
-use std::io::{Error, ErrorKind};
+use std::io::{Error, ErrorKind, Write};
 use std::io::Result as IoResult;
 use std::{env, fmt, mem};
 use std::marker::PhantomData;
@@ -95,6 +95,17 @@ impl Module {
                 Ok(())
             }
         })
+    }
+
+    /// Write this module's assembly into a String.
+    pub fn write_assembly(&self, buffer: &mut Write) -> IoResult<()> {
+        unsafe {
+            let c_str = core::LLVMPrintModuleToString(self.into());
+            let rust_str = CStr::from_ptr(c_str).to_str().unwrap();
+            let res = write!(buffer, "{}", rust_str);
+            core::LLVMDisposeMessage(c_str);
+            res
+        }
     }
     /// Add a function to the module with the name given.
     pub fn add_function<'a>(&'a self, name: &str, sig: &'a Type) -> &'a mut Function {
