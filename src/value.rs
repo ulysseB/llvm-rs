@@ -111,6 +111,16 @@ impl Arg {
     }
 }
 
+/// A PHI node.
+pub struct PhiNode;
+native_ref!(&PhiNode = LLVMValueRef);
+impl Deref for PhiNode {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        unsafe { mem::transmute(self) }
+    }
+}
+
 /// A global value (eg: Function, Alias, Global variable)
 pub struct GlobalValue;
 native_ref!(&GlobalValue = LLVMValueRef);

@@ -6,7 +6,7 @@ use std::mem;
 use block::BasicBlock;
 use context::Context;
 use ty::Type;
-use value::{Function, Value, Predicate};
+use value::{Function, Value, Predicate, PhiNode};
 
 static NULL_NAME:[c_char; 1] = [0];
 
@@ -177,6 +177,11 @@ impl Builder {
         } else {
             panic!("expected numbers, got {:?}", at)
         }
+    }
+
+    /// Builds a PHI node.
+    pub fn build_phi(&self, ty: &Type) -> &PhiNode {
+        unsafe { core::LLVMBuildPhi(self.into(), ty.into(), NULL_NAME.as_ptr()).into() }
     }
 }
 
