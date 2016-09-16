@@ -232,6 +232,7 @@ impl<'a> IntoIterator for &'a Module {
     /// Iterate through the functions in the module
     fn into_iter(self) -> Functions<'a> {
         Functions {
+            index: 0,
             value: unsafe { core::LLVMGetFirstFunction(self.into()) },
             marker: PhantomData
         }
@@ -243,19 +244,25 @@ dispose!(Module, LLVMModule, core::LLVMDisposeModule);
 #[derive(Copy, Clone)]
 /// An iterator through the functions contained in a module.
 pub struct Functions<'a> {
+    index: usize,
     value: LLVMValueRef,
     marker: PhantomData<&'a ()>
 }
 impl<'a> Iterator for Functions<'a> {
     type Item = &'a Function;
     fn next(&mut self) -> Option<&'a Function> {
-        if self.value.is_null() {
+        let o = if self.value.is_null() {
             None
+        } else if self.index == 0 {
+            Some(self.value.into())
         } else {
             let c_next = unsafe { core::LLVMGetNextFunction(self.value) };
             self.value = c_next;
             Some(self.value.into())
-        }
+        };
+
+        self.index += 1;
+        o
     }
 }
 
