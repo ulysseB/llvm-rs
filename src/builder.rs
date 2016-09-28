@@ -1,18 +1,20 @@
 use libc::{c_char, c_uint};
 use ffi::prelude::{LLVMBuilderRef, LLVMValueRef};
 use ffi::{core, LLVMBuilder, LLVMRealPredicate, LLVMIntPredicate};
-use cbox::{CSemiBox, DisposeRef};
+use cbox::CSemiBox;
+use std::marker::PhantomData;
 use std::mem;
 use block::BasicBlock;
 use context::Context;
-use ty::Type;
-use value::{Function, Value, Predicate, PhiNode};
+use types::Type;
+use value::{Function, Value, Predicate};
 
 static NULL_NAME:[c_char; 1] = [0];
 
 /// This provides a uniform API for creating instructions and inserting them into a basic block.
-pub struct Builder;
+pub struct Builder(PhantomData<[u8]>);
 native_ref!(&Builder = LLVMBuilderRef);
+dispose!{Builder, LLVMBuilder, core::LLVMDisposeBuilder}
 macro_rules! bin_op(
     ($name:ident, $func:ident) => (
         pub fn $name(&self, left: &Value, right: &Value) -> &Value {
@@ -111,6 +113,14 @@ impl Builder {
     pub fn build_bit_cast(&self, value: &Value, dest: &Type) -> &Value {
         unsafe { core::LLVMBuildBitCast(self.into(), value.into(), dest.into(), NULL_NAME.as_ptr()).into() }
     }
+    /// Build an instruction to bitcast in integer into a pointer.
+    pub fn build_int_to_ptr(&self, value: &Value, dest: &Type) -> &Value {
+        unsafe { core::LLVMBuildIntToPtr(self.into(), value.into(), dest.into(), NULL_NAME.as_ptr()).into() }
+    }
+    /// Build an instruction that zero extends its operand to the type `dest`.
+    pub fn build_zext(&self, value: &Value, dest: &Type) -> &Value {
+        unsafe { core::LLVMBuildZExtOrBitCast(self.into(), value.into(), dest.into(), NULL_NAME.as_ptr()).into() }
+    }
     /// Build an instruction that truncates the high-order bits of value to fit into a certain type.
     pub fn build_trunc(&self, value: &Value, dest: &Type) -> &Value {
         unsafe { core::LLVMBuildTrunc(self.into(), value.into(), dest.into(), NULL_NAME.as_ptr()).into() }
@@ -150,7 +160,7 @@ impl Builder {
     bin_op!{build_ashr, LLVMBuildAShr}
     bin_op!{build_and, LLVMBuildAnd}
     bin_op!{build_or, LLVMBuildOr}
-    /// Build an instruction to compare two values with the predicate given.
+    /// Build an instruction to compare the values `a` and `b` with the predicate / comparative operator `pred`.
     pub fn build_cmp(&self, a: &Value, b: &Value, pred: Predicate) -> &Value {
         let (at, bt) = (a.get_type(), b.get_type());
         assert_eq!(at, bt);
@@ -177,18 +187,5 @@ impl Builder {
         } else {
             panic!("expected numbers, got {:?}", at)
         }
-    }
-
-    /// Builds a PHI node.
-    pub fn build_phi(&self, ty: &Type) -> &PhiNode {
-        unsafe { core::LLVMBuildPhi(self.into(), ty.into(), NULL_NAME.as_ptr()).into() }
-    }
-}
-
-impl DisposeRef for Builder {
-    type RefTo = LLVMBuilder;
-    #[inline(always)]
-    unsafe fn dispose(ptr: LLVMBuilderRef) {
-        core::LLVMDisposeBuilder(ptr)
     }
 }

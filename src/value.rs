@@ -5,14 +5,40 @@ use ffi::LLVMLinkage;
 use std::ffi::CString;
 use std::{fmt, mem};
 use std::ops::{Deref, Index};
-use block::BasicBlock;
+use std::marker::PhantomData;
+use block::{BasicBlock, BlockIter};
 use context::{Context, GetContext};
-use ty::{FunctionType, Type};
-use util::{self, CastFrom};
+use types::{FunctionType, Type};
+use util::{self, Sub};
+
+macro_rules! sub {
+    ($this:ty, $name:ident) => (
+        sub!{$this, $name, ::Value}
+    );
+    ($this:ty, $name:ident, $sup:ty) => (
+unsafe impl Sub<$sup> for $this {
+    fn is(value: &$sup) -> bool {
+        unsafe {
+            !core::$name(value.into()).is_null()
+        }
+    }
+    fn from_super(value: &$sup) -> Option<&$this> {
+        unsafe { mem::transmute(core::$name(value.into())) }
+    }
+}
+impl Deref for $this {
+    type Target = $sup;
+    fn deref(&self) -> &$sup {
+        self.to_super()
+    }
+}
+    )
+}
 
 /// A typed value that can be used as an operand in instructions.
-pub struct Value;
+pub struct Value(PhantomData<[u8]>);
 native_ref!(&Value = LLVMValueRef);
+to_str!{Value, LLVMPrintValueToString}
 impl Value {
     /// Create a new constant struct from the values given.
     pub fn new_struct<'a>(context: &'a Context, vals: &[&'a Value], packed: bool) -> &'a Value {
@@ -63,15 +89,11 @@ pub enum Predicate {
     LessThan,
     LessThanOrEqual
 }
-/// A function argument.
-pub struct Arg;
+/// An argument that is passed to a function.
+pub struct Arg(PhantomData<[u8]>);
 native_ref!(&Arg = LLVMValueRef);
-impl Deref for Arg {
-    type Target = Value;
-    fn deref(&self) -> &Value {
-        unsafe { mem::transmute(self) }
-    }
-}
+sub!{Arg, LLVMIsAArgument}
+to_str!{Arg, LLVMPrintValueToString}
 impl Arg {
     /// Add the attribute given to this argument.
     pub fn add_attribute(&self, attr: Attribute) {
@@ -111,34 +133,11 @@ impl Arg {
     }
 }
 
-/// A PHI node.
-pub struct PhiNode;
-native_ref!(&PhiNode = LLVMValueRef);
-impl Deref for PhiNode {
-    type Target = Value;
-    fn deref(&self) -> &Value {
-        unsafe { mem::transmute(self) }
-    }
-}
-
-/// A global value (eg: Function, Alias, Global variable)
-pub struct GlobalValue;
+/// A value with global scope (eg: Function, Alias, Global variable)
+pub struct GlobalValue(PhantomData<[u8]>);
 native_ref!(&GlobalValue = LLVMValueRef);
-impl Deref for GlobalValue {
-    type Target = Value;
-    fn deref(&self) -> &Value {
-        unsafe { mem::transmute(self) }
-    }
-}
-impl CastFrom for GlobalValue {
-    type From = Value;
-    fn cast<'a>(val: &'a Value) -> Option<&'a GlobalValue> {
-        unsafe {
-            let global = mem::transmute(core::LLVMIsAGlobalValue(val.into()));
-            util::ptr_to_null(global)
-        }
-    }
-}
+sub!{GlobalValue, LLVMIsAGlobalValue}
+to_str!{GlobalValue, LLVMPrintValueToString}
 impl GlobalValue {
     /// Set the linkage type for this global
     pub fn set_linkage(&self, linkage: Linkage) {
@@ -162,23 +161,10 @@ impl GlobalValue {
 }
 
 /// A global variable
-pub struct GlobalVariable;
+pub struct GlobalVariable(PhantomData<[u8]>);
 native_ref!(&GlobalVariable = LLVMValueRef);
-impl Deref for GlobalVariable {
-    type Target = GlobalValue;
-    fn deref(&self) -> &GlobalValue {
-        unsafe { mem::transmute(self) }
-    }
-}
-impl CastFrom for GlobalVariable {
-    type From = Value;
-    fn cast<'a>(val: &'a Value) -> Option<&'a GlobalVariable> {
-        unsafe {
-            let global = mem::transmute(core::LLVMIsAGlobalVariable(val.into()));
-            util::ptr_to_null(global)
-        }
-    }
-}
+sub!{GlobalVariable, LLVMIsAGlobalVariable, GlobalValue}
+to_str!{GlobalVariable, LLVMPrintValueToString}
 impl GlobalVariable {
     /// Set the initial value of the global
     pub fn set_initializer(&self, val: &Value) {
@@ -202,40 +188,24 @@ impl GlobalVariable {
     /// Returns true if this global is a constant.
     pub fn get_constant(&self) -> bool {
         unsafe {
-            // FIXME: There should be a constant for True/False
-            core::LLVMIsGlobalConstant(self.into()) == 1
+            core::LLVMIsGlobalConstant(self.into()) != 0
         }
     }
 }
 
-/// An alias to another global
-pub struct Alias;
+/// An alias to another global value.
+pub struct Alias(PhantomData<[u8]>);
 native_ref!(&Alias = LLVMValueRef);
-impl Deref for Alias {
-    type Target = GlobalValue;
-    fn deref(&self) -> &GlobalValue {
-        unsafe { mem::transmute(self) }
-    }
-}
-impl CastFrom for Alias {
-    type From = Value;
-    fn cast<'a>(val: &'a Value) -> Option<&'a Alias> {
-        unsafe {
-            let alias = mem::transmute(core::LLVMIsAGlobalAlias(val.into()));
-            util::ptr_to_null(alias)
-        }
-    }
-}
-
-/// A function that can be called and contains blocks.
-pub struct Function;
+sub!{Alias, LLVMIsAGlobalAlias, GlobalValue}
+to_str!{Alias, LLVMPrintValueToString}
+/// A function is a kind of value that can be called and contains blocks of code.
+///
+/// To get the value of each argument to a function, you can use the index operator.
+/// For example, `&func[0]` is the value that represents the first argument to the function.
+pub struct Function(PhantomData<[u8]>);
 native_ref!(&Function = LLVMValueRef);
-impl Deref for Function {
-    type Target = GlobalValue;
-    fn deref(&self) -> &GlobalValue {
-        unsafe { mem::transmute(self) }
-    }
-}
+sub!{Function, LLVMIsAFunction, GlobalValue}
+to_str!{Function, LLVMPrintValueToString}
 impl Index<usize> for Function {
     type Output = Arg;
     fn index(&self, index: usize) -> &Arg {
@@ -248,19 +218,9 @@ impl Index<usize> for Function {
         }
     }
 }
-impl CastFrom for Function {
-    type From = Value;
-    fn cast<'a>(val: &'a Value) -> Option<&'a Function> {
-        let ty = val.get_type();
-        let mut is_func = ty.is_function();
-        if let Some(elem) = ty.get_element() {
-            is_func = is_func || elem.is_function()
-        }
-        if is_func {
-            Some(unsafe { mem::transmute(val) })
-        } else {
-            None
-        }
+unsafe impl Sub<Value> for Function {
+    fn is(value: &Value) -> bool {
+        FunctionType::is(value.get_type())
     }
 }
 impl Function {
@@ -270,16 +230,13 @@ impl Function {
             core::LLVMAppendBasicBlockInContext(self.get_context().into(), self.into(), ptr).into()
         })
     }
+    /// Iterate through this function's basic blocks.
+    pub fn blocks(&self) -> BlockIter {
+        BlockIter::new(self)
+    }
     /// Returns the entry block of this function or `None` if there is none.
     pub fn get_entry(&self) -> Option<&BasicBlock> {
         unsafe { mem::transmute(core::LLVMGetEntryBasicBlock(self.into())) }
-    }
-    /// Returns the name of this function.
-    pub fn get_name(&self) -> &str {
-        unsafe {
-            let c_name = core::LLVMGetValueName(self.into());
-            util::to_str(c_name as *mut i8)
-        }
     }
     /// Returns the function signature representing this function's signature.
     pub fn get_signature(&self) -> &FunctionType {
@@ -330,7 +287,7 @@ impl GetContext for Function {
         self.get_type().get_context()
     }
 }
-/// A way of indicating to LLVM how you want arguments / functions to be handled.
+/// These indicate how you want arguments / functions to be handled.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 #[repr(C)]
 pub enum Attribute {
@@ -374,7 +331,7 @@ pub enum Attribute {
     NoRedZone =         0b1000000000000000000,
     /// Disable implicit float instructions.
     NoImplicitFloat =   0b10000000000000000000,
-    /// Naked function.
+    /// Only allows native assembly code in the function.
     Naked =             0b100000000000000000000,
     /// The source language has marked this function as inline.
     InlineHint =        0b1000000000000000000000,
@@ -441,4 +398,3 @@ impl GetContext for Value {
         self.get_type().get_context()
     }
 }
-to_str!(Value, LLVMPrintValueToString);
