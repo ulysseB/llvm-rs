@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use block::BasicBlock;
 use context::Context;
 use types::Type;
-use value::{Function, Value, Predicate};
+use value::{Function, Value, Predicate, PhiNode};
 
 static NULL_NAME:[c_char; 1] = [0];
 
@@ -159,7 +159,7 @@ impl Builder {
     }
     /// Build a phi node which is used together with branching to select a value depending on the predecessor of the current block
     pub fn build_phi<'ctx>(&self, ty: &'ctx Type, entries: &[(&'ctx Value, &'ctx BasicBlock)])
-        -> &'ctx Value
+        -> &'ctx PhiNode
     {
         let phi_node = unsafe { core::LLVMBuildPhi(self.into(), ty.into(), NULL_NAME.as_ptr()) };
 

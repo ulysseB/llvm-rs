@@ -398,3 +398,18 @@ impl GetContext for Value {
         self.get_type().get_context()
     }
 }
+
+/// A phi node.
+native_ref!(&PhiNode = LLVMValueRef);
+sub!{PhiNode, LLVMIsAPHINode}
+to_str!{PhiNode, LLVMPrintValueToString}
+pub struct PhiNode(PhantomData<[u8]>);
+
+impl PhiNode {
+    /// Adds an incoming edge to the Phi.
+    pub fn add_incoming<'a>(&self, value: &'a Value, block: &'a BasicBlock) {
+        unsafe {
+            core::LLVMAddIncoming(self.into(), &mut value.into(), &mut block.into(), 1)
+        }
+    }
+}
