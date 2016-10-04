@@ -3,7 +3,6 @@ use ffi::prelude::{LLVMBuilderRef, LLVMValueRef};
 use ffi::{core, LLVMBuilder, LLVMRealPredicate, LLVMIntPredicate};
 use cbox::CSemiBox;
 use std::marker::PhantomData;
-use std::mem;
 use block::BasicBlock;
 use context::Context;
 use types::Type;
@@ -65,6 +64,9 @@ impl Builder {
         unsafe { core::LLVMBuildArrayAlloca(self.into(), elem.into(), size.into(), NULL_NAME.as_ptr() as *const c_char) }.into()
     }
     /// Build an instruction that allocates a pointer to fit the size of `ty` then returns this pointer.
+    ///
+    /// Make sure to call `build_free` with the pointer value when you're done with it, or you're
+    /// gonna have a bad time.
     pub fn build_alloca(&self, ty: &Type) -> &Value {
         unsafe { core::LLVMBuildAlloca(self.into(), ty.into(), NULL_NAME.as_ptr() as *const c_char) }.into()
     }
@@ -82,8 +84,8 @@ impl Builder {
         unsafe { core::LLVMBuildBr(self.into(), dest.into()).into() }
     }
     /// Build an instruction that branches to `if_block` if `cond` evaluates to true, and `else_block` otherwise.
-    pub fn build_cond_br(&self, cond: &Value, if_block: &BasicBlock, else_block: Option<&BasicBlock>) -> &Value {
-        unsafe { core::LLVMBuildCondBr(self.into(), cond.into(), if_block.into(), mem::transmute(else_block)).into() }
+    pub fn build_cond_br(&self, cond: &Value, if_block: &BasicBlock, else_block: &BasicBlock) -> &Value {
+        unsafe { core::LLVMBuildCondBr(self.into(), cond.into(), if_block.into(), else_block.into()).into() }
     }
     /// Build an instruction that calls the function `func` with the arguments `args`.
     ///
@@ -113,9 +115,19 @@ impl Builder {
     pub fn build_bit_cast(&self, value: &Value, dest: &Type) -> &Value {
         unsafe { core::LLVMBuildBitCast(self.into(), value.into(), dest.into(), NULL_NAME.as_ptr()).into() }
     }
-    /// Build an instruction to bitcast in integer into a pointer.
-    pub fn build_int_to_ptr(&self, value: &Value, dest: &Type) -> &Value {
-        unsafe { core::LLVMBuildIntToPtr(self.into(), value.into(), dest.into(), NULL_NAME.as_ptr()).into() }
+    /// Build an instruction that casts an integer to a pointer.
+    pub fn build_int_to_ptr(&self, val: &Value, dest: &Type) -> &Value {
+        unsafe {
+            core::LLVMBuildIntToPtr(self.into(), val.into(), dest.into(), NULL_NAME.as_ptr())
+                .into()
+        }
+    }
+    /// Build an instruction that casts a pointer to an integer.
+    pub fn build_ptr_to_int(&self, val: &Value, dest: &Type) -> &Value {
+        unsafe {
+            core::LLVMBuildPtrToInt(self.into(), val.into(), dest.into(), NULL_NAME.as_ptr())
+                .into()
+        }
     }
     /// Build an instruction to bitcast a pointer into an integer.
     pub fn build_ptr_to_int(&self, value: &Value, dest: &Type) -> &Value {
@@ -133,10 +145,6 @@ impl Builder {
     pub fn build_insert_value(&self, agg: &Value, elem: &Value, index: usize) -> &Value {
         unsafe { core::LLVMBuildInsertValue(self.into(), agg.into(), elem.into(), index as c_uint, NULL_NAME.as_ptr()).into() }
     }
-    /// Build an instruction that extracts a value from an aggregate data value.
-    pub fn build_extract_value(&self, agg: &Value, index: usize) -> &Value {
-        unsafe { core::LLVMBuildExtractValue(self.into(), agg.into(), index as c_uint, NULL_NAME.as_ptr()).into() }
-    }
     /// Build an instruction that computes the address of a subelement of an aggregate data structure.
     ///
     /// Basically type-safe pointer arithmetic.
@@ -153,6 +161,17 @@ impl Builder {
             switch.into()
         }
     }
+    /// Build a phi node which is used together with branching to select a value depending on the predecessor of the current block
+    pub fn build_phi<'ctx>(&self, ty: &'ctx Type, entries: &[(&'ctx Value, &'ctx BasicBlock)])
+        -> &'ctx Value
+    {
+        let phi_node = unsafe { core::LLVMBuildPhi(self.into(), ty.into(), NULL_NAME.as_ptr()) };
+
+        for &(val, preds) in entries {
+            unsafe { core::LLVMAddIncoming(phi_node, &mut val.into(), &mut preds.into(), 1) }
+        }
+        phi_node.into()
+    }
     un_op!{build_load, LLVMBuildLoad}
     un_op!{build_neg, LLVMBuildNeg}
     un_op!{build_not, LLVMBuildNot}
@@ -164,7 +183,8 @@ impl Builder {
     bin_op!{build_ashr, LLVMBuildAShr}
     bin_op!{build_and, LLVMBuildAnd}
     bin_op!{build_or, LLVMBuildOr}
-    /// Build an instruction to compare the values `a` and `b` with the predicate / comparative operator `pred`.
+    bin_op!{build_xor, LLVMBuildXor}
+    /// Build an instruction to compare two values with the predicate given.
     pub fn build_cmp(&self, a: &Value, b: &Value, pred: Predicate) -> &Value {
         let (at, bt) = (a.get_type(), b.get_type());
         assert_eq!(at, bt);

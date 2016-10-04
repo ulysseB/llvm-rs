@@ -3,8 +3,10 @@ use ffi::prelude::{LLVMValueRef, LLVMModuleRef};
 use ffi::analysis::LLVMVerifierFailureAction;
 use ffi::{analysis, core, linker, LLVMModule};
 use ffi::transforms::pass_manager_builder as builder;
+use ffi::transforms::ipo as ipo;
 use ffi::bit_writer as writer;
 use ffi::bit_reader as reader;
+use ffi::ir_reader;
 use cbox::{CBox, CSemiBox};
 use std::ffi::{CStr, CString};
 use std::iter::{Iterator, IntoIterator};
@@ -13,7 +15,7 @@ use std::io::Result as IoResult;
 use std::{env, fmt, mem};
 use std::marker::PhantomData;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Child};
 use buffer::MemoryBuffer;
 use context::{Context, GetContext};
 use value::{Alias, Function, GlobalValue, GlobalVariable, Value};
@@ -96,7 +98,6 @@ impl Module {
             }
         })
     }
-
     /// Write this module's assembly into a String.
     pub fn write_assembly(&self, buffer: &mut Write) -> IoResult<()> {
         unsafe {
@@ -105,6 +106,19 @@ impl Module {
             let res = write!(buffer, "{}", rust_str);
             core::LLVMDisposeMessage(c_str);
             res
+        }
+    }
+    /// Parse IR assembly unto a module, or return an error string.
+    pub fn parse_ir_from_str<'a>(context: &'a Context, s: &str) -> Result<CSemiBox<'a, Module>, CBox<str>> {
+        unsafe {
+            let mut out = mem::uninitialized();
+            let mut err = mem::uninitialized();
+            let buf = try!(MemoryBuffer::new_from_str(s, None));
+            if ir_reader::LLVMParseIRInContext(context.into(), buf.as_ptr(), &mut out, &mut err) == 1 {
+                Err(CBox::new(err))
+            } else {
+                Ok(CSemiBox::new(out))
+            }
         }
     }
     /// Add a function to the module with the name given.
@@ -141,7 +155,17 @@ impl Module {
             let builder = builder::LLVMPassManagerBuilderCreate();
             builder::LLVMPassManagerBuilderSetOptLevel(builder, opt_level as c_uint);
             builder::LLVMPassManagerBuilderSetSizeLevel(builder, size_level as c_uint);
+
             let pass_manager = core::LLVMCreatePassManager();
+
+            if opt_level > 1 {
+                builder::LLVMPassManagerBuilderUseInlinerWithThreshold(builder, size_level as c_uint);
+            } else {
+                // otherwise, we will add the builder to the top of the list of passes.
+                // This is not exactly what llvm-opt does, but it is pretty close
+                ipo::LLVMAddAlwaysInlinerPass(pass_manager);
+            }
+
             builder::LLVMPassManagerBuilderPopulateModulePassManager(builder, pass_manager);
             builder::LLVMPassManagerBuilderDispose(builder);
             core::LLVMRunPassManager(pass_manager, self.into());
@@ -180,7 +204,7 @@ impl Module {
     ///
     /// Note that this uses the LLVM tool `llc` to do this, which may or may not be
     /// installed on the user's machine.
-    pub fn compile(&self, path: &Path, opt_level: usize) -> IoResult<()> {
+    pub fn compile(&self, path: &Path, opt_level: usize) -> IoResult<Child> {
         let dir = env::temp_dir();
         let path = path.to_str().unwrap();
         let mod_path = dir.join("module.bc");
@@ -192,7 +216,6 @@ impl Module {
             .arg("-o").arg(path)
             .arg(mod_path)
             .spawn()
-            .map(|_| ())
     }
 
     /// Link a module into this module, returning an error string if an error occurs.
@@ -233,6 +256,7 @@ impl<'a> IntoIterator for &'a Module {
     /// Iterate through the functions in the module
     fn into_iter(self) -> Functions<'a> {
         Functions {
+            index: 0,
             value: unsafe { core::LLVMGetFirstFunction(self.into()) },
             marker: PhantomData
         }
@@ -244,19 +268,25 @@ dispose!(Module, LLVMModule, core::LLVMDisposeModule);
 #[derive(Copy, Clone)]
 /// An iterator through the functions contained in a module.
 pub struct Functions<'a> {
+    index: usize,
     value: LLVMValueRef,
     marker: PhantomData<&'a ()>
 }
 impl<'a> Iterator for Functions<'a> {
     type Item = &'a Function;
     fn next(&mut self) -> Option<&'a Function> {
-        if self.value.is_null() {
+        let o = if self.value.is_null() {
             None
+        } else if self.index == 0 {
+            Some(self.value.into())
         } else {
             let c_next = unsafe { core::LLVMGetNextFunction(self.value) };
             self.value = c_next;
             Some(self.value.into())
-        }
+        };
+
+        self.index += 1;
+        o
     }
 }
 
