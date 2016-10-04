@@ -129,10 +129,6 @@ impl Builder {
                 .into()
         }
     }
-    /// Build an instruction to bitcast a pointer into an integer.
-    pub fn build_ptr_to_int(&self, value: &Value, dest: &Type) -> &Value {
-        unsafe { core::LLVMBuildPtrToInt(self.into(), value.into(), dest.into(), NULL_NAME.as_ptr()).into() }
-    }
     /// Build an instruction that zero extends its operand to the type `dest`.
     pub fn build_zext(&self, value: &Value, dest: &Type) -> &Value {
         unsafe { core::LLVMBuildZExtOrBitCast(self.into(), value.into(), dest.into(), NULL_NAME.as_ptr()).into() }
