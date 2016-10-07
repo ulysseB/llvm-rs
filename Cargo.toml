@@ -22,4 +22,4 @@ lto = true
 [dependencies]
 cbox = "0.*"
 libc = "0.*"
-llvm-sys = "0.4.*"
+llvm-sys = { git = "https://github.com/TomBebbington/llvm-sys.rs" }
